@@ -169,4 +169,12 @@ install(TARGETS pcd_viewer
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_executable(camera_pose_estimator utils/camera_pose_estimator.cpp)
+target_include_directories(camera_pose_estimator PRIVATE ${PCL_INCLUDE_DIRS})
+target_link_libraries(camera_pose_estimator ${PCL_LIBRARIES})
+
+install(TARGETS camera_pose_estimator 
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
