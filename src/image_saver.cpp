@@ -22,7 +22,7 @@ public:
     declare_parameter<std::string>("image_topic", "/isaacsim/rgb");
     declare_parameter<int>("save_interval", 10);
     declare_parameter<std::string>("image_dir", "/home/airlab/dataset/airlab_3dgs/timestamps");
-    declare_parameter<std::string>("timestamp_file", "/home/airlab/dataset/airlab_3dgs/timestamps/image_timestamps.csv");
+    declare_parameter<std::string>("timestamp_file", "/home/airlab/dataset/airlab_3dgs/timestamps/image.csv");
     declare_parameter<std::string>("image_prefix", "frame");
     image_topic_ = get_parameter("image_topic").as_string();
     save_interval_ = get_parameter("save_interval").as_int();

@@ -169,30 +169,31 @@ install(
 add_executable(pcd_viewer utils/pcd_viewer.cpp)
 target_include_directories(pcd_viewer PRIVATE ${PCL_INCLUDE_DIRS})
 target_link_libraries(pcd_viewer ${PCL_LIBRARIES})
-install(TARGETS pcd_viewer
-  DESTINATION lib/${PROJECT_NAME}
-)
+install(TARGETS pcd_viewer DESTINATION lib/${PROJECT_NAME})
 
-add_executable(camera_pose_estimator utils/camera_pose_estimator.cpp)
-target_include_directories(camera_pose_estimator PRIVATE ${PCL_INCLUDE_DIRS})
-target_link_libraries(camera_pose_estimator ${PCL_LIBRARIES})
-install(TARGETS camera_pose_estimator 
-  DESTINATION lib/${PROJECT_NAME}
-)
+add_executable(pose_viewer utils/pose_viewer.cpp)
+target_include_directories(pose_viewer PRIVATE ${PCL_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIRS})
+target_link_libraries(pose_viewer ${PCL_LIBRARIES} yaml-cpp)
+install(TARGETS pose_viewer DESTINATION lib/${PROJECT_NAME})
 
-add_executable(color_registration utils/color_registration.cpp)
-target_include_directories(color_registration PRIVATE ${PCL_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIRS})
-target_link_libraries(color_registration ${PCL_LIBRARIES} ${OpenCV_LIBS} yaml-cpp)
-install(TARGETS color_registration DESTINATION lib/${PROJECT_NAME})
+add_executable(pose_estimator utils/pose_estimator.cpp)
+target_include_directories(pose_estimator PRIVATE ${PCL_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIRS})
+target_link_libraries(pose_estimator ${PCL_LIBRARIES} yaml-cpp)
+install(TARGETS pose_estimator DESTINATION lib/${PROJECT_NAME})
 
-add_executable(color_reconstruction utils/color_reconstruction.cpp)
-target_include_directories(color_reconstruction PRIVATE ${PCL_INCLUDE_DIRS})
-target_link_libraries(color_reconstruction ${PCL_LIBRARIES})
-install(TARGETS color_reconstruction DESTINATION lib/${PROJECT_NAME})
+add_executable(registration utils/registration.cpp)
+target_include_directories(registration PRIVATE ${PCL_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIRS})
+target_link_libraries(registration ${PCL_LIBRARIES} ${OpenCV_LIBS} yaml-cpp)
+install(TARGETS registration DESTINATION lib/${PROJECT_NAME})
 
-add_executable(colmap_export utils/colmap_export.cpp)
-target_include_directories(colmap_export PRIVATE ${PCL_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIRS})
-target_link_libraries(colmap_export ${PCL_LIBRARIES} yaml-cpp)
-install(TARGETS colmap_export DESTINATION lib/${PROJECT_NAME})
+add_executable(reconstruction utils/reconstruction.cpp)
+target_include_directories(reconstruction PRIVATE ${PCL_INCLUDE_DIRS})
+target_link_libraries(reconstruction ${PCL_LIBRARIES} yaml-cpp)
+install(TARGETS reconstruction DESTINATION lib/${PROJECT_NAME})
+
+add_executable(export_colmap utils/export_colmap.cpp)
+target_include_directories(export_colmap PRIVATE ${PCL_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIRS})
+target_link_libraries(export_colmap ${PCL_LIBRARIES} ${OpenCV_LIBS} yaml-cpp)
+install(TARGETS export_colmap DESTINATION lib/${PROJECT_NAME})
 
 ament_package()

@@ -12,7 +12,7 @@ def generate_launch_description():
         '/isaacsim/camera_info',
         '/isaacsim/rgb',
         '/isaacsim/lidar',
-        '/isaacsim/imu',
+        #'/isaacsim/imu',
         '/isaacsim/odom',
         '/tf',
     ]

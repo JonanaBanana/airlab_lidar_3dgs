@@ -51,15 +51,17 @@ struct Config
     double sphere_radius = 200.0;
     int sphere_num_pts = 50000;
 
-    // Camera-to-body transform
+    // Camera-to-body transform (T_body_cam)
+    // Set to identity if poses are already in camera frame
+    bool poses_are_body_frame = true;
     Eigen::Matrix4d trans_mat = Eigen::Matrix4d::Identity();
 
     // Paths (relative to data_folder)
-    std::string pcd_file = "pcd/global_point_cloud.pcd";
-    std::string poses_file = "poses/image_poses.csv";
+    std::string pcd_file = "pcd/input.pcd";
+    std::string poses_file = "poses.csv";
     std::string images_dir = "images";
-    std::string output_file = "point_cloud_color_information.csv";
-    std::string downsampled_file = "pcd/downsampled_point_cloud.pcd";
+    std::string registration_file = "color_registration.csv";
+    std::string downsampled_file = "pcd/downsampled.pcd";
 };
 
 // ========================= Config Parser =========================
@@ -92,9 +94,10 @@ Config load_config(const std::string & path)
 
     cfg.hpr_radius = node["hpr_radius"].as<double>(cfg.hpr_radius);
 
-    cfg.fill_background = node["fill_background"].as<bool>(cfg.fill_background);
-    cfg.sphere_radius   = node["sphere_radius"].as<double>(cfg.sphere_radius);
-    cfg.sphere_num_pts  = node["sphere_num_points"].as<int>(cfg.sphere_num_pts);
+    cfg.fill_background       = node["fill_background"].as<bool>(cfg.fill_background);
+    cfg.sphere_radius         = node["sphere_radius"].as<double>(cfg.sphere_radius);
+    cfg.sphere_num_pts        = node["sphere_num_points"].as<int>(cfg.sphere_num_pts);
+    cfg.poses_are_body_frame  = node["poses_are_body_frame"].as<bool>(cfg.poses_are_body_frame);
 
     if (node["trans_mat"])
     {
@@ -110,8 +113,7 @@ Config load_config(const std::string & path)
     cfg.pcd_file         = node["pcd_file"].as<std::string>(cfg.pcd_file);
     cfg.poses_file       = node["poses_file"].as<std::string>(cfg.poses_file);
     cfg.images_dir       = node["images_dir"].as<std::string>(cfg.images_dir);
-    cfg.output_file      = node["output_file"].as<std::string>(cfg.output_file);
-    cfg.downsampled_file = node["downsampled_file"].as<std::string>(cfg.downsampled_file);
+    cfg.registration_file      = node["registration_file"].as<std::string>(cfg.registration_file);
 
     return cfg;
 }
@@ -130,7 +132,7 @@ void print_config(const Config & cfg)
     std::cout << "  PCD file:        " << cfg.pcd_file << std::endl;
     std::cout << "  Poses file:      " << cfg.poses_file << std::endl;
     std::cout << "  Images dir:      " << cfg.images_dir << std::endl;
-    std::cout << "  Output file:     " << cfg.output_file << std::endl;
+    std::cout << "  Output file:     " << cfg.registration_file << std::endl;
     std::cout << "=====================" << std::endl;
 }
 
@@ -148,6 +150,20 @@ struct ColorObservation
 {
     int point_id;
     float r, g, b;
+};
+
+/* 
+struct ProjPoint
+{
+    int iu, iv;
+    float r, g, b;
+}; 
+*/
+
+struct ProjPoint
+{
+    int iu, iv;
+    float depth;
 };
 
 // ========================= Helpers =========================
@@ -217,7 +233,6 @@ void generate_sphere_points(Eigen::MatrixXd & points, int start_row,
     }
 }
 
-// OPT 7: Scalar math instead of Eigen::Vector3d per point
 std::vector<int> hidden_point_removal(
     const pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud,
     const Eigen::Vector3d & viewpoint,
@@ -281,22 +296,21 @@ std::vector<int> hidden_point_removal(
 // ========================= Main =========================
 int main(int argc, char** argv)
 {
-    if (argc < 3)
+    if (argc < 2)
     {
-        std::cerr << "Usage: " << argv[0] << " <data_folder> <config_file> [--viz]" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <data_folder> [--diag]" << std::endl;
         return 1;
+    }
+    bool diagnostics = false;
+    for (int i = 2; i < argc; i++)
+    {
+        if (std::string(argv[i]) == "--diag") diagnostics = true;
     }
 
     std::string data_folder = argv[1];
     if (data_folder.back() != '/') data_folder += '/';
 
-    std::string config_path = argv[2];
-
-    bool visualize = false;
-    for (int i = 3; i < argc; i++)
-    {
-        if (std::string(argv[i]) == "--viz") visualize = true;
-    }
+    std::string config_path = data_folder + "config.cfg";
 
     Config cfg = load_config(config_path);
     print_config(cfg);
@@ -304,10 +318,10 @@ int main(int argc, char** argv)
     std::string pcd_path = data_folder + cfg.pcd_file;
     std::string poses_path = data_folder + cfg.poses_file;
     std::string images_dir = data_folder + cfg.images_dir + "/";
-    std::string output_path = data_folder + cfg.output_file;
+    std::string output_path = data_folder + cfg.registration_file;
     std::string downsampled_path = data_folder + cfg.downsampled_file;
 
-    // OPT 4: Precompute FOV tangent thresholds
+    // Precompute FOV tangent thresholds
     double fov_x = 2.0 * std::atan2(cfg.img_w, 2.0 * cfg.f);
     double fov_y = 2.0 * std::atan2(cfg.img_h, 2.0 * cfg.f);
     double tan_half_fov_x = std::tan(fov_x * 0.5);
@@ -356,7 +370,7 @@ int main(int argc, char** argv)
     int num_sphere = cfg.fill_background ? cfg.sphere_num_pts : 0;
     int total_points = num_original + num_sphere;
 
-    // OPT 3: Store points as [4 x N] column-major so T * points is a single
+    // Store points as [4 x N] column-major so T * points is a single
     // matrix multiply with no transposes
     Eigen::Matrix<double, 4, Eigen::Dynamic> points_h(4, total_points);
     for (int i = 0; i < num_original; i++)
@@ -393,19 +407,18 @@ int main(int argc, char** argv)
         }
     }
 
-    // OPT 8: Save as binary PCD
+    // Save as binary PCD
+    pcl::PointCloud<pcl::PointXYZ> save_cloud;
+    save_cloud.resize(total_points);
+    for (int i = 0; i < total_points; i++)
     {
-        pcl::PointCloud<pcl::PointXYZ> save_cloud;
-        save_cloud.resize(total_points);
-        for (int i = 0; i < total_points; i++)
-        {
-            save_cloud[i].x = points_h(0, i);
-            save_cloud[i].y = points_h(1, i);
-            save_cloud[i].z = points_h(2, i);
-        }
-        pcl::io::savePCDFileBinary(downsampled_path, save_cloud);
-        std::cout << "Saved downsampled point cloud to " << downsampled_path << std::endl;
+        save_cloud[i].x = points_h(0, i);
+        save_cloud[i].y = points_h(1, i);
+        save_cloud[i].z = points_h(2, i);
     }
+    pcl::io::savePCDFileBinary(downsampled_path, save_cloud);
+    
+    std::cout << "Saved downsampled point cloud to " << downsampled_path << std::endl;
 
     auto image_poses = read_image_poses(poses_path);
     if (image_poses.empty())
@@ -417,17 +430,15 @@ int main(int argc, char** argv)
 
     // ---- Visualization state ----
     Eigen::MatrixXf point_colors = Eigen::MatrixXf::Constant(total_points, 3, 0.1f);
-    pcl::PointCloud<pcl::PointXYZRGB> viz_cloud;
-    bool viewer_initialized = false;
 
     // ---- Process each image ----
     std::vector<ColorObservation> all_observations;
     all_observations.reserve(total_points * 2);
 
-    // OPT 3: Pre-allocate camera-frame result as [4 x N] — reused each iteration
+    // Pre-allocate camera-frame result as [4 x N] — reused each iteration
     Eigen::Matrix<double, 4, Eigen::Dynamic> cam_points(4, total_points);
 
-    // OPT 6: Pre-allocate buffers, reuse each frame via clear()/resize()
+    // Pre-allocate buffers, reuse each frame via clear()/resize()
     std::vector<int> fov_indices;
     fov_indices.reserve(total_points / 4);
 
@@ -453,14 +464,16 @@ int main(int argc, char** argv)
             pose.px, pose.py, pose.pz,
             pose.qx, pose.qy, pose.qz, pose.qw);
 
-        Eigen::Matrix4d T_world_cam = T_world_body * cfg.trans_mat;
+        Eigen::Matrix4d T_world_cam = cfg.poses_are_body_frame
+                                     ? T_world_body * cfg.trans_mat
+                                     : T_world_body;
         Eigen::Matrix4d T_cam_world = T_world_cam.inverse();
 
-        // OPT 3: Single matrix multiply, no transposes
+        // Single matrix multiply, no transposes
         // cam_points [4 x N] = T_cam_world [4 x 4] * points_h [4 x N]
         cam_points.noalias() = T_cam_world * points_h;
 
-        // OPT 4 & 5: FOV filtering with tangent comparison, cache results in cam_points
+        // FOV filtering with tangent comparison, cache results in cam_points
         fov_indices.clear();
 
         for (int i = 0; i < total_points; i++)
@@ -471,7 +484,7 @@ int main(int argc, char** argv)
             double cx = cam_points(0, i);
             double cy = cam_points(1, i);
 
-            // OPT 4: |cx| < cz * tan(fov/2) is equivalent to |atan2(cx,cz)| < fov/2
+            // Precompute FOV tangent thresholds
             if (std::abs(cx) < cz * tan_half_fov_x && std::abs(cy) < cz * tan_half_fov_y)
                 fov_indices.push_back(i);
         }
@@ -479,7 +492,7 @@ int main(int argc, char** argv)
         if (fov_indices.empty()) continue;
 
         // ---- Hidden point removal ----
-        // OPT 6: Reuse visible_cloud allocation
+        // Reuse visible_cloud allocation
         visible_cloud->points.resize(fov_indices.size());
         visible_cloud->width = fov_indices.size();
         visible_cloud->height = 1;
@@ -499,12 +512,13 @@ int main(int argc, char** argv)
 
         // ---- Project to image plane ----
         int found = 0;
+        std::vector<ProjPoint> diag_points;
+
         for (int hi : hpr_indices)
         {
             if (hi < 0 || hi >= static_cast<int>(fov_indices.size())) continue;
             int orig_idx = fov_indices[hi];
 
-            // OPT 5: Reuse already-transformed camera coordinates
             double cx = cam_points(0, orig_idx);
             double cy = cam_points(1, orig_idx);
             double cz = cam_points(2, orig_idx);
@@ -525,40 +539,53 @@ int main(int argc, char** argv)
 
             all_observations.push_back({orig_idx, r, g, b});
 
-            if (visualize)
+            if (diagnostics)
             {
                 point_colors(orig_idx, 0) = r;
                 point_colors(orig_idx, 1) = g;
                 point_colors(orig_idx, 2) = b;
+                diag_points.push_back({iu, iv, static_cast<float>(cz)});
             }
 
             found++;
         }
-
-        // ---- Update visualization cloud ----
-        if (visualize)
+        // ---- Diagnostic: depth overlay ----
+        if (diagnostics && !diag_points.empty())
         {
-            if (!viewer_initialized)
+            cv::Mat verify = cv::imread(images_dir + pose.filename);
+            if (!verify.empty())
             {
-                vtkObject::GlobalWarningDisplayOff();
-                viz_cloud.resize(total_points);
-                for (int i = 0; i < total_points; i++)
+                // Find depth range
+                double d_min = std::numeric_limits<double>::max();
+                double d_max = 0.0;
+                for (const auto & dp : diag_points)
                 {
-                    viz_cloud[i].x = points_h(0, i);
-                    viz_cloud[i].y = points_h(1, i);
-                    viz_cloud[i].z = points_h(2, i);
-                    viz_cloud[i].r = 25;
-                    viz_cloud[i].g = 25;
-                    viz_cloud[i].b = 25;
+                    d_min = std::min(d_min, static_cast<double>(dp.depth));
+                    d_max = std::max(d_max, static_cast<double>(dp.depth));
                 }
-                viewer_initialized = true;
-            }
+                double d_range = (d_max - d_min > 1e-6) ? d_max - d_min : 1.0;
 
-            for (int i = 0; i < total_points; i++)
-            {
-                viz_cloud[i].r = static_cast<uint8_t>(point_colors(i, 0) * 255);
-                viz_cloud[i].g = static_cast<uint8_t>(point_colors(i, 1) * 255);
-                viz_cloud[i].b = static_cast<uint8_t>(point_colors(i, 2) * 255);
+                cv::Mat overlay = verify.clone();
+                for (const auto & dp : diag_points)
+                {
+                    float t = static_cast<float>((dp.depth - d_min) / d_range);
+                    float hue = (1.0f - t) * 270.0f;
+                    float c = 1.0f;
+                    float x = c * (1.0f - std::fabs(std::fmod(hue / 60.0f, 2.0f) - 1.0f));
+                    float rf, gf, bf;
+                    if      (hue < 60)  { rf = c; gf = x; bf = 0; }
+                    else if (hue < 120) { rf = x; gf = c; bf = 0; }
+                    else if (hue < 180) { rf = 0; gf = c; bf = x; }
+                    else if (hue < 240) { rf = 0; gf = x; bf = c; }
+                    else                { rf = x; gf = 0; bf = c; }
+
+                    cv::Scalar color(bf * 255, gf * 255, rf * 255);
+                    cv::circle(overlay, cv::Point(dp.iu, dp.iv), 2, color, -1);
+                }
+
+                std::string diag_dir = data_folder + "diagnostics/color_registration/";
+                std::filesystem::create_directories(diag_dir);
+                cv::imwrite(diag_dir + pose.filename, overlay);
             }
         }
 
@@ -593,23 +620,5 @@ int main(int argc, char** argv)
               << " color observations to '" << output_path << "'"
               << " in " << std::fixed << std::setprecision(1) << total_elapsed << "s"
               << std::endl;
-
-    // ---- Show example point cloud ----
-    // ---- This is not final point cloud, just contains last color definitions for each point ----
-    // ---- the final colored point cloud will be constructed in 
-    if (visualize && viewer_initialized)
-    {
-        std::cout << "Opening viewer. Close the window to exit." << std::endl;
-        pcl::visualization::PCLVisualizer viewer("Color Registration");
-        viewer.setBackgroundColor(0.05, 0.05, 0.05);
-        viewer.addCoordinateSystem(0.5);
-
-        pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> handler(viz_cloud.makeShared());
-        viewer.addPointCloud(viz_cloud.makeShared(), handler, "cloud");
-        viewer.setPointCloudRenderingProperties(
-            pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "cloud");
-
-        viewer.spin();
-    }
     return 0;
 }

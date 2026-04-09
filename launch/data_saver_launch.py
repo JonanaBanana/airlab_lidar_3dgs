@@ -8,7 +8,7 @@ import os
 
 def generate_launch_description():
     pkg_dir = get_package_share_directory('airlab_lidar_3dgs')
-    output_dir = '/home/airlab/dataset/airlab_3dgs/test1'
+    output_dir = '/home/airlab/dataset/airlab_3dgs/test2'
 
     """Parameters for the composed nodes"""
     lidar_topic = '/isaacsim/lidar'
@@ -28,15 +28,17 @@ def generate_launch_description():
 
     leaf_size = 0.03
 
+    max_path_length = 10000
+
     """Do not change these subdirectories as they are used by the nodes to save data in an organized manner."""
     """Subdirectories"""
     pcd_output_dir = os.path.join(output_dir, 'pcd')
     image_output_dir = os.path.join(output_dir, 'images')
     timestamp_dir = os.path.join(output_dir, 'timestamps')
     """Output File Locations"""
-    pcd_output_location = os.path.join(pcd_output_dir, 'global_point_cloud.pcd')
-    image_timestamp_output_location = os.path.join(timestamp_dir, 'image_timestamps.csv')
-    odom_timestamp_output_location = os.path.join(timestamp_dir, 'odom_timestamps.csv')
+    pcd_output_location = os.path.join(pcd_output_dir, 'input.pcd')
+    image_timestamp_output_location = os.path.join(timestamp_dir, 'image.csv')
+    odom_timestamp_output_location = os.path.join(timestamp_dir, 'odom.csv')
 
     """Create necessary directories if they don't exist."""
     os.makedirs(pcd_output_dir, exist_ok=True)
@@ -81,7 +83,8 @@ def generate_launch_description():
                     parameters=[{
                         'odom_topic': odom_topic,
                         'path_topic': path_topic,
-                        'frame_id': frame_id
+                        'frame_id': frame_id,
+                        'max_path_length': max_path_length
                     }],
                     extra_arguments=[{'use_intra_process_comms': True}]
                 ),

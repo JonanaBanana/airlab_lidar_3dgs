@@ -23,7 +23,7 @@ class GlobalProcessor : public rclcpp::Node
       declare_parameter<std::string>("input_topic",  "/airlab_lidar_3dgs/accumulated_point_cloud");
       declare_parameter<std::string>("output_topic", "/airlab_lidar_3dgs/global_point_cloud");
       declare_parameter<float>("leaf_size", 0.05);
-      declare_parameter<std::string>("output_location", "/home/airlab/dataset/global_point_cloud.pcd");
+      declare_parameter<std::string>("output_location", "/home/airlab/dataset/input.pcd");
       declare_parameter<std::string>("frame_id", "World");
       in_topic_ = get_parameter("input_topic").as_string();
       out_topic_ = get_parameter("output_topic").as_string();
@@ -60,22 +60,23 @@ class GlobalProcessor : public rclcpp::Node
         pcl::fromROSMsg(msg, *buffer_cloud_);
         sor_.setInputCloud(buffer_cloud_);
         sor_.setLeafSize(leaf_size_, leaf_size_, leaf_size_);
-        time_t start = clock();       
+        auto start = std::chrono::steady_clock::now();
         sor_.filter(*buffer_cloud_);
-        time_t end = clock();
-        double elapsed = double(end - start) / CLOCKS_PER_SEC;
+        auto end = std::chrono::steady_clock::now();
+        double elapsed = std::chrono::duration<double>(end - start).count();
         RCLCPP_INFO(this->get_logger(), "Voxel grid filter applied. Original points: '%d', Filtered points: '%d', Time taken: '%.3f' seconds.", 
         (int)msg.height * (int)msg.width, (int)buffer_cloud_->size(), elapsed);
         *output_cloud_ += *buffer_cloud_;
         //RCLCPP_INFO(this->get_logger(), "Global point cloud now has '%d' points.", (int)output_cloud_->size());
-        if (count_ > 5){
-            RCLCPP_INFO(this->get_logger(), "Processed 10 point clouds. Downsampling global point cloud...");
+        if (count_ > 4) // After processing 5 point clouds, downsample and save the global cloud
+        {
+            RCLCPP_INFO(this->get_logger(), "Processed 5 point clouds. Downsampling global point cloud...");
             sor_.setInputCloud(output_cloud_);
             sor_.setLeafSize(0.05f, 0.05f, 0.05f);
-            time_t start = clock();
+            auto start = std::chrono::steady_clock::now();
             sor_.filter(*output_cloud_);
-            time_t end = clock();
-            double elapsed = double(end - start) / CLOCKS_PER_SEC;
+            auto end = std::chrono::steady_clock::now();
+            double elapsed = std::chrono::duration<double>(end - start).count();
             RCLCPP_INFO(this->get_logger(), "Global downsampling complete. Remaining points: '%d', Time taken: '%.3f' seconds.", (int)output_cloud_->size(), elapsed);
             pcl::io::savePCDFileASCII (output_location_, *output_cloud_);
             RCLCPP_INFO(this->get_logger(), "Saved Output to file at: '%s'", output_location_.c_str());

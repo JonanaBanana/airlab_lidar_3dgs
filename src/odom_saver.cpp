@@ -17,7 +17,7 @@ public:
   : Node("odom_saver", options)
   {
     declare_parameter<std::string>("odom_topic", "/isaacsim/odom");
-    declare_parameter<std::string>("output_file", "/home/airlab/dataset/airlab_3dgs/timestamps/odometry_timestamps.csv");
+    declare_parameter<std::string>("output_file", "/home/airlab/dataset/airlab_3dgs/timestamps/odom.csv");
     declare_parameter<int>("save_interval", 1);
 
     odom_topic_ = get_parameter("odom_topic").as_string();

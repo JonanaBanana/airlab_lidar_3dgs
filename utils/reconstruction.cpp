@@ -7,9 +7,46 @@
 #include <iomanip>
 #include <chrono>
 #include <cmath>
+#include <yaml-cpp/yaml.h>
 
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
+
+// ========================= Configuration =========================
+struct Config
+{
+    // Paths (relative to data_folder)
+    std::string downsampled_file = "pcd/downsampled.pcd";
+    std::string reconstructed_file = "pcd/reconstructed.pcd";
+    std::string registration_file = "color_registration.csv";
+};
+
+// ========================= Config Parser =========================
+
+Config load_config(const std::string & path)
+{
+    Config cfg;
+    YAML::Node node;
+
+    try {
+        node = YAML::LoadFile(path);
+    } catch (const YAML::Exception & e) {
+        std::cerr << "Error reading config: " << e.what() << std::endl;
+        return cfg;
+    }
+    cfg.downsampled_file      = node["downsampled_file"].as<std::string>(cfg.downsampled_file);
+    cfg.registration_file     = node["registration_file"].as<std::string>(cfg.registration_file);
+    cfg.reconstructed_file    = node["reconstructed_file"].as<std::string>(cfg.reconstructed_file);
+    return cfg;
+}
+
+void print_config(const Config & cfg)
+{
+    std::cout << "=== Configuration ===" << std::endl;
+    std::cout << "  Input point cloud:    "         << cfg.downsampled_file << std::endl;
+    std::cout << "  Color registration file:      " << cfg.registration_file << std::endl;
+    std::cout << "  Output point cloud:    "        << cfg.reconstructed_file << std::endl;
+}
 
 struct ColorObs
 {
@@ -22,16 +59,8 @@ int main(int argc, char** argv)
     if (argc < 2)
     {
         std::cerr << "Usage: " << argv[0] << " <data_folder> [--ascii]" << std::endl;
-        std::cerr << "Reads:" << std::endl;
-        std::cerr << "  <data_folder>/pcd/downsampled_point_cloud.pcd" << std::endl;
-        std::cerr << "  <data_folder>/point_cloud_color_information.csv" << std::endl;
-        std::cerr << "Writes:" << std::endl;
-        std::cerr << "  <data_folder>/pcd/reconstructed.pcd" << std::endl;
         return 1;
     }
-
-    std::string data_folder = argv[1];
-    if (data_folder.back() != '/') data_folder += '/';
 
     bool save_ascii = false;
     for (int i = 2; i < argc; i++)
@@ -39,9 +68,15 @@ int main(int argc, char** argv)
         if (std::string(argv[i]) == "--ascii") save_ascii = true;
     }
 
-    std::string pcd_path = data_folder + "pcd/downsampled_point_cloud.pcd";
-    std::string csv_path = data_folder + "point_cloud_color_information.csv";
-    std::string out_path = data_folder + "pcd/reconstructed.pcd";
+    std::string data_folder = argv[1];
+    if (data_folder.back() != '/') data_folder += '/';
+    std::string config_path = data_folder + "config.cfg";
+    Config cfg = load_config(config_path);
+    print_config(cfg);
+
+    std::string pcd_path = data_folder + cfg.downsampled_file;
+    std::string csv_path = data_folder + cfg.registration_file;
+    std::string out_path = data_folder + cfg.reconstructed_file;
 
     auto t_start = std::chrono::high_resolution_clock::now();
 

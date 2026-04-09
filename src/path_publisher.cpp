@@ -14,10 +14,12 @@ public:
     declare_parameter<std::string>("odom_topic", "/odom");
     declare_parameter<std::string>("path_topic", "/airlab_lidar_3dgs/path");
     declare_parameter<std::string>("frame_id", "World");
+    declare_parameter<int>("max_path_length", 10000);
 
     odom_topic_ = get_parameter("odom_topic").as_string();
     path_topic_ = get_parameter("path_topic").as_string();
     frame_id_ = get_parameter("frame_id").as_string();
+    max_path_length_ = get_parameter("max_path_length").as_int();
 
     RCLCPP_INFO(this->get_logger(),
       "PathPublisher initialized with odom topic: '%s', path topic: '%s', frame id: '%s'",
@@ -41,6 +43,8 @@ private:
 
     path_.header.stamp = msg.header.stamp;
     path_.poses.push_back(pose);
+    if (static_cast<int>(path_.poses.size()) > max_path_length_)
+        path_.poses.erase(path_.poses.begin());
 
     publisher_->publish(path_);
   }
@@ -51,6 +55,7 @@ private:
   std::string odom_topic_;
   std::string path_topic_;
   std::string frame_id_;
+  int max_path_length_;
 
   nav_msgs::msg::Path path_;
 };

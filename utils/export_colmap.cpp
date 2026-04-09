@@ -12,6 +12,8 @@
 
 #include <yaml-cpp/yaml.h>
 #include <Eigen/Dense>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
@@ -30,10 +32,16 @@ struct Config
     double max_depth = 400.0;
     double hpr_radius = 100000.0;
 
+    // Camera-to-body transform (T_body_cam): T_world_cam = T_world_body * T_body_cam
+    // Set to identity if poses are already in camera frame
     Eigen::Matrix4d trans_mat = Eigen::Matrix4d::Identity();
 
+    // If true, poses in CSV are body-frame and trans_mat is applied
+    // If false, poses are already camera-frame and trans_mat is skipped
+    bool poses_are_body_frame = true;
+
     std::string reconstructed_file = "pcd/reconstructed.pcd";
-    std::string poses_file = "poses/image_poses.csv";
+    std::string poses_file = "poses.csv";
     std::string images_dir = "images";
 };
 
@@ -58,6 +66,8 @@ Config load_config(const std::string & path)
     cfg.min_depth = node["min_depth"].as<double>(cfg.min_depth);
     cfg.max_depth = node["max_depth"].as<double>(cfg.max_depth);
     cfg.hpr_radius = node["hpr_radius"].as<double>(cfg.hpr_radius);
+
+    cfg.poses_are_body_frame = node["poses_are_body_frame"].as<bool>(cfg.poses_are_body_frame);
 
     if (node["trans_mat"])
     {
@@ -94,7 +104,6 @@ struct Point2DObs
 };
 
 // ========================= Binary Writers =========================
-// COLMAP binary format: little-endian
 
 template<typename T>
 void write_bin(std::ofstream & f, T val)
@@ -110,12 +119,10 @@ void write_cameras_bin(const std::string & path,
     std::ofstream f(path, std::ios::binary);
     uint64_t num_cameras = 1;
     write_bin(f, num_cameras);
-
     write_bin(f, camera_id);
     write_bin(f, model_id);
     write_bin(f, static_cast<uint64_t>(width));
     write_bin(f, static_cast<uint64_t>(height));
-
     for (double p : params)
         write_bin(f, p);
 }
@@ -151,26 +158,19 @@ void write_images_bin(const std::string & path,
     for (size_t i = 0; i < num_images; i++)
     {
         write_bin(f, image_ids[i]);
-
-        // qvec: qw, qx, qy, qz
         write_bin(f, qvecs[i](0));
         write_bin(f, qvecs[i](1));
         write_bin(f, qvecs[i](2));
         write_bin(f, qvecs[i](3));
-
-        // tvec
         write_bin(f, tvecs[i](0));
         write_bin(f, tvecs[i](1));
         write_bin(f, tvecs[i](2));
-
         write_bin(f, camera_ids[i]);
 
-        // Name as null-terminated string
         for (char c : names[i])
             write_bin(f, c);
         write_bin(f, '\0');
 
-        // 2D points
         uint64_t num_points = all_obs[i].size();
         write_bin(f, num_points);
         for (const auto & obs : all_obs[i])
@@ -215,7 +215,8 @@ void write_images_txt(const std::string & path,
 }
 
 void write_points3D_bin(const std::string & path,
-                        const pcl::PointCloud<pcl::PointXYZRGB> & cloud)
+                        const pcl::PointCloud<pcl::PointXYZRGB> & cloud,
+                        const std::vector<std::vector<std::pair<int32_t, int32_t>>> & tracks)
 {
     std::ofstream f(path, std::ios::binary);
     uint64_t num_points = cloud.size();
@@ -224,36 +225,56 @@ void write_points3D_bin(const std::string & path,
     for (uint64_t i = 0; i < num_points; i++)
     {
         const auto & pt = cloud[i];
-
-        // POINT3D_ID
         write_bin(f, i);
-
-        // XYZ
         write_bin(f, static_cast<double>(pt.x));
         write_bin(f, static_cast<double>(pt.y));
         write_bin(f, static_cast<double>(pt.z));
-
-        // RGB
         write_bin(f, pt.r);
         write_bin(f, pt.g);
         write_bin(f, pt.b);
+        write_bin(f, 0.1);  // error
 
-        // Error
-        write_bin(f, 0.1);
-
-        // Track length = 0 (dummy)
-        uint64_t track_length = 0;
-        write_bin(f, track_length);
+        uint64_t track_length = tracks[i].size();
+        if (track_length == 0)
+        {
+            // Must have at least 1 track entry for COLMAP compatibility
+            track_length = 1;
+            write_bin(f, track_length);
+            write_bin(f, static_cast<int32_t>(1));  // dummy image_id
+            write_bin(f, static_cast<int32_t>(0));  // dummy point2d_idx
+        }
+        else
+        {
+            write_bin(f, track_length);
+            for (const auto & [img_id, pt2d_idx] : tracks[i])
+            {
+                write_bin(f, img_id);
+                write_bin(f, pt2d_idx);
+            }
+        }
     }
 }
 
 void write_points3D_txt(const std::string & path,
-                        const pcl::PointCloud<pcl::PointXYZRGB> & cloud)
+                        const pcl::PointCloud<pcl::PointXYZRGB> & cloud,
+                        const std::vector<std::vector<std::pair<int32_t, int32_t>>> & tracks)
 {
     std::ofstream f(path);
+    
+    // Compute mean track length
+    double mean_track = 0;
+    if (!cloud.empty())
+    {
+        size_t total = 0;
+        for (size_t i = 0; i < cloud.size(); i++)
+            total += std::max(tracks[i].size(), static_cast<size_t>(1));
+        mean_track = static_cast<double>(total) / cloud.size();
+    }
+
     f << "# 3D point list with one line of data per point:\n";
     f << "#   POINT3D_ID, X, Y, Z, R, G, B, ERROR, TRACK[] as (IMAGE_ID, POINT2D_IDX)\n";
-    f << "# Number of points: " << cloud.size() << "\n";
+    f << "# Number of points: " << cloud.size()
+      << ", mean track length: " << std::fixed << std::setprecision(4) << mean_track << "\n";
 
     f << std::fixed << std::setprecision(8);
     for (size_t i = 0; i < cloud.size(); i++)
@@ -264,7 +285,18 @@ void write_points3D_txt(const std::string & path,
           << static_cast<int>(pt.r) << " "
           << static_cast<int>(pt.g) << " "
           << static_cast<int>(pt.b) << " "
-          << "0.1\n";
+          << "0.1";
+
+        if (tracks[i].empty())
+        {
+            f << " 1 0";
+        }
+        else
+        {
+            for (const auto & [img_id, pt2d_idx] : tracks[i])
+                f << " " << img_id << " " << pt2d_idx;
+        }
+        f << "\n";
     }
 }
 
@@ -277,7 +309,7 @@ std::vector<ImagePose> read_image_poses(const std::string & path)
     if (!file.is_open()) return poses;
 
     std::string line;
-    std::getline(file, line); // skip header
+    std::getline(file, line);
 
     while (std::getline(file, line))
     {
@@ -308,21 +340,22 @@ Eigen::Matrix4d quat_to_matrix(double px, double py, double pz,
     Eigen::Quaterniond q(qw, qx, qy, qz);
     q.normalize();
     T.block<3, 3>(0, 0) = q.toRotationMatrix();
-    T(0, 3) = px;
-    T(1, 3) = py;
-    T(2, 3) = pz;
+    T(0, 3) = px; T(1, 3) = py; T(2, 3) = pz;
     return T;
 }
 
-// Convert rotation matrix to COLMAP quaternion (qw, qx, qy, qz)
-// Using Shepperd's method — same as the Python rotmat2qvec
+// Matches Python's rotmat2qvec exactly (COLMAP read_write_model.py)
+// Python unpacks R.flat (row-major) as: Rxx=R[0,0], Ryx=R[0,1], Rzx=R[0,2],
+//   Rxy=R[1,0], Ryy=R[1,1], Rzy=R[1,2], Rxz=R[2,0], Ryz=R[2,1], Rzz=R[2,2]
+// Bottom row: K[3][:3] = {Ryz-Rzy, Rzx-Rxz, Rxy-Ryx}
+//           = {R[2,1]-R[1,2], R[0,2]-R[2,0], R[1,0]-R[0,1]}
 Eigen::Vector4d rotmat_to_qvec(const Eigen::Matrix3d & R)
 {
     Eigen::Matrix4d K;
     K << R(0,0) - R(1,1) - R(2,2), 0, 0, 0,
          R(1,0) + R(0,1), R(1,1) - R(0,0) - R(2,2), 0, 0,
          R(2,0) + R(0,2), R(2,1) + R(1,2), R(2,2) - R(0,0) - R(1,1), 0,
-         R(1,2) - R(2,1), R(2,0) - R(0,2), R(0,1) - R(1,0), R(0,0) + R(1,1) + R(2,2);
+         R(2,1) - R(1,2), R(0,2) - R(2,0), R(1,0) - R(0,1), R(0,0) + R(1,1) + R(2,2);
     K /= 3.0;
 
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix4d> solver(K);
@@ -332,15 +365,13 @@ Eigen::Vector4d rotmat_to_qvec(const Eigen::Matrix3d & R)
     int max_idx;
     eigvals.maxCoeff(&max_idx);
 
-    // COLMAP convention: [qw, qx, qy, qz] mapped from eigenvector rows [3, 0, 1, 2]
     Eigen::Vector4d qvec;
-    qvec(0) = eigvecs(3, max_idx); // qw
-    qvec(1) = eigvecs(0, max_idx); // qx
-    qvec(2) = eigvecs(1, max_idx); // qy
-    qvec(3) = eigvecs(2, max_idx); // qz
+    qvec(0) = eigvecs(3, max_idx);
+    qvec(1) = eigvecs(0, max_idx);
+    qvec(2) = eigvecs(1, max_idx);
+    qvec(3) = eigvecs(2, max_idx);
 
     if (qvec(0) < 0) qvec = -qvec;
-
     return qvec;
 }
 
@@ -358,7 +389,6 @@ std::vector<int> hidden_point_removal(
         const double px = cloud->points[i].x;
         const double py = cloud->points[i].y;
         const double pz = cloud->points[i].z;
-
         const double dist = std::sqrt(px * px + py * py + pz * pz);
 
         if (dist < 1e-10)
@@ -373,7 +403,6 @@ std::vector<int> hidden_point_removal(
         (*flipped)[i].z = pz + scale * pz;
     }
 
-    // Viewpoint at origin
     (*flipped)[n].x = 0;
     (*flipped)[n].y = 0;
     (*flipped)[n].z = 0;
@@ -401,20 +430,30 @@ std::vector<int> hidden_point_removal(
 // ========================= Main =========================
 int main(int argc, char** argv)
 {
-    if (argc < 3)
+    if (argc < 2)
     {
-        std::cerr << "Usage: " << argv[0] << " <data_folder> <config_file>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <data_folder> [--diag]" << std::endl;
         std::cerr << "Output: <data_folder>/distorted/sparse/0/{cameras,images,points3D}.{bin,txt}" << std::endl;
         return 1;
     }
 
     std::string data_folder = argv[1];
     if (data_folder.back() != '/') data_folder += '/';
+    std::string config_path = data_folder + "config.cfg";
 
-    Config cfg = load_config(argv[2]);
+    bool diagnostics = false;
+    for (int i = 2; i < argc; i++)
+    {
+        if (std::string(argv[i]) == "--diag") diagnostics = true;
+    }
+
+    Config cfg = load_config(config_path);
+
+    std::cout << "Poses are " << (cfg.poses_are_body_frame ? "BODY frame (trans_mat will be applied)" : "CAMERA frame (trans_mat skipped)") << std::endl;
 
     std::string pcd_path = data_folder + cfg.reconstructed_file;
     std::string poses_path = data_folder + cfg.poses_file;
+    std::string images_dir = data_folder + cfg.images_dir + "/";
     std::string output_dir = data_folder + "distorted/sparse/0/";
 
     std::filesystem::create_directories(output_dir);
@@ -442,7 +481,7 @@ int main(int argc, char** argv)
     std::cout << "Loaded " << N << " image poses" << std::endl;
 
     // ==================================================================
-    // cameras.bin / cameras.txt — SIMPLE_PINHOLE: f, cx, cy
+    // cameras.bin / cameras.txt
     // ==================================================================
     {
         int camera_id = 1;
@@ -459,16 +498,10 @@ int main(int argc, char** argv)
     // ==================================================================
     // images.bin / images.txt
     // ==================================================================
-    // Precompute FOV thresholds
     double fov_x = 2.0 * std::atan2(cfg.img_w, 2.0 * cfg.f);
     double fov_y = 2.0 * std::atan2(cfg.img_h, 2.0 * cfg.f);
     double tan_half_fov_x = std::tan(fov_x * 0.5);
     double tan_half_fov_y = std::tan(fov_y * 0.5);
-
-    Eigen::Matrix<double, 3, 4> proj_mat;
-    proj_mat << cfg.f, 0, cfg.px, 0,
-                0, cfg.f, cfg.py, 0,
-                0, 0, 1, 0;
 
     // Build homogeneous points [4 x R]
     Eigen::Matrix<double, 4, Eigen::Dynamic> points_h(4, total_points);
@@ -480,7 +513,7 @@ int main(int argc, char** argv)
         points_h(3, i) = 1.0;
     }
 
-    // Output arrays for images
+    // Output arrays
     std::vector<int> image_ids;
     std::vector<Eigen::Vector4d> qvecs;
     std::vector<Eigen::Vector3d> tvecs;
@@ -500,20 +533,42 @@ int main(int argc, char** argv)
     {
         const auto & pose = image_poses[img_idx];
 
-        // Build camera-from-world transform: inv(T_world_body * trans_mat)
-        Eigen::Matrix4d T_world_body = quat_to_matrix(
+        // ----------------------------------------------------------------
+        // Step 1: Build T_world_cam from pose
+        //   - If poses are body-frame: T_world_cam = T_world_body * trans_mat
+        //   - If poses are camera-frame: T_world_cam = T_world_pose (as-is)
+        // ----------------------------------------------------------------
+        Eigen::Matrix4d T_pose = quat_to_matrix(
             pose.px, pose.py, pose.pz,
             pose.qx, pose.qy, pose.qz, pose.qw);
 
-        Eigen::Matrix4d T_world_cam = T_world_body * cfg.trans_mat;
+        Eigen::Matrix4d T_world_cam;
+        if (cfg.poses_are_body_frame)
+            T_world_cam = T_pose * cfg.trans_mat;
+        else
+            T_world_cam = T_pose;
+
+        // ----------------------------------------------------------------
+        // Step 2: Compute T_cam_world = inv(T_world_cam)
+        //   This is what COLMAP stores: "projection from world to camera"
+        //   Matches Python: q_transform = np.linalg.inv(transform[i] @ trans_mat)
+        // ----------------------------------------------------------------
         Eigen::Matrix4d T_cam_world = T_world_cam.inverse();
 
-        // Extract COLMAP quaternion and translation from T_cam_world
-        Eigen::Matrix3d R_cam = T_cam_world.block<3, 3>(0, 0);
-        Eigen::Vector3d t_cam = T_cam_world.block<3, 1>(0, 3);
-        Eigen::Vector4d qvec = rotmat_to_qvec(R_cam);
+        // ----------------------------------------------------------------
+        // Step 3: Extract COLMAP qvec and tvec from T_cam_world
+        //   qvec = rotmat2qvec(T_cam_world[:3,:3])
+        //   tvec = T_cam_world[:3, 3]
+        //   Camera center can be recovered as: C = -R^T * t
+        // ----------------------------------------------------------------
+        Eigen::Matrix3d R_cam_world = T_cam_world.block<3, 3>(0, 0);
+        Eigen::Vector3d t_cam_world = T_cam_world.block<3, 1>(0, 3);
+        Eigen::Vector4d qvec = rotmat_to_qvec(R_cam_world);
 
-        // Transform all points to camera frame
+        // ----------------------------------------------------------------
+        // Step 4: Transform points to camera frame for FOV/HPR/projection
+        //   (same T_cam_world used for both pose output and projection)
+        // ----------------------------------------------------------------
         cam_points.noalias() = T_cam_world * points_h;
 
         // FOV + depth filtering
@@ -532,10 +587,9 @@ int main(int argc, char** argv)
 
         if (fov_indices.empty())
         {
-            // Still need to write an entry with empty observations
             image_ids.push_back(img_idx + 1);
             qvecs.push_back(qvec);
-            tvecs.push_back(t_cam);
+            tvecs.push_back(t_cam_world);
             camera_ids.push_back(1);
             image_names.push_back(pose.filename);
             all_observations.push_back({});
@@ -556,7 +610,7 @@ int main(int argc, char** argv)
 
         std::vector<int> hpr_indices = hidden_point_removal(visible_cloud, cfg.hpr_radius);
 
-        // Project visible points to image plane
+        // Project visible points
         std::vector<Point2DObs> obs;
         obs.reserve(hpr_indices.size());
 
@@ -580,10 +634,60 @@ int main(int argc, char** argv)
 
         image_ids.push_back(img_idx + 1);
         qvecs.push_back(qvec);
-        tvecs.push_back(t_cam);
+        tvecs.push_back(t_cam_world);
         camera_ids.push_back(1);
         image_names.push_back(pose.filename);
         all_observations.push_back(std::move(obs));
+
+        // ---- Diagnostic: depth overlay ----
+        if (diagnostics)
+        {
+            const auto & diag_obs = all_observations.back();
+            cv::Mat verify = cv::imread(images_dir + pose.filename);
+            if (!verify.empty() && !diag_obs.empty())
+            {
+                double d_min = std::numeric_limits<double>::max();
+                double d_max = 0.0;
+                for (const auto & o : diag_obs)
+                {
+                    int pid = static_cast<int>(o.point3d_id);
+                    if (pid < 0 || pid >= total_points) continue;
+                    double cz = cam_points(2, pid);
+                    d_min = std::min(d_min, cz);
+                    d_max = std::max(d_max, cz);
+                }
+                double d_range = (d_max - d_min > 1e-6) ? d_max - d_min : 1.0;
+
+                cv::Mat overlay = verify.clone();
+                for (const auto & o : diag_obs)
+                {
+                    int pid = static_cast<int>(o.point3d_id);
+                    if (pid < 0 || pid >= total_points) continue;
+                    int iu = std::clamp(static_cast<int>(o.x), 0, overlay.cols - 1);
+                    int iv = std::clamp(static_cast<int>(o.y), 0, overlay.rows - 1);
+
+                    double cz = cam_points(2, pid);
+                    float t = static_cast<float>((cz - d_min) / d_range);
+
+                    float hue = (1.0f - t) * 270.0f;
+                    float c = 1.0f;
+                    float x = c * (1.0f - std::fabs(std::fmod(hue / 60.0f, 2.0f) - 1.0f));
+                    float rf, gf, bf;
+                    if      (hue < 60)  { rf = c; gf = x; bf = 0; }
+                    else if (hue < 120) { rf = x; gf = c; bf = 0; }
+                    else if (hue < 180) { rf = 0; gf = c; bf = x; }
+                    else if (hue < 240) { rf = 0; gf = x; bf = c; }
+                    else                { rf = x; gf = 0; bf = c; }
+
+                    cv::Scalar color(bf * 255, gf * 255, rf * 255);
+                    cv::circle(overlay, cv::Point(iu, iv), 2, color, -1);
+                }
+
+                std::string diag_dir = data_folder + "diagnostics/colmap_export/";
+                std::filesystem::create_directories(diag_dir);
+                cv::imwrite(diag_dir + pose.filename, overlay);
+            }
+        }
 
         std::cout << img_idx << "/" << N - 1
                   << " — " << pose.filename
@@ -601,9 +705,22 @@ int main(int argc, char** argv)
     // points3D.bin / points3D.txt
     // ==================================================================
     std::cout << "Writing points3D..." << std::endl;
+    // track[point_id] = list of (image_id, point2d_idx)
+    std::vector<std::vector<std::pair<int32_t, int32_t>>> tracks(total_points);
 
-    write_points3D_bin(output_dir + "points3D.bin", *cloud);
-    write_points3D_txt(output_dir + "points3D.txt", *cloud);
+    for (size_t i = 0; i < all_observations.size(); i++)
+    {
+        int32_t img_id = image_ids[i];
+        for (int32_t j = 0; j < static_cast<int32_t>(all_observations[i].size()); j++)
+        {
+            int pt_id = static_cast<int>(all_observations[i][j].point3d_id);
+            if (pt_id >= 0 && pt_id < total_points)
+                tracks[pt_id].push_back({img_id, j});
+        }
+    }
+
+    write_points3D_bin(output_dir + "points3D.bin", *cloud, tracks);
+    write_points3D_txt(output_dir + "points3D.txt", *cloud, tracks);
     std::cout << "points3D.bin and points3D.txt created!" << std::endl;
 
     auto t_end = std::chrono::high_resolution_clock::now();
@@ -612,9 +729,6 @@ int main(int argc, char** argv)
     std::cout << "\nCOLMAP export complete in " << std::fixed << std::setprecision(1)
               << elapsed << "s" << std::endl;
     std::cout << "Output: " << output_dir << std::endl;
-    std::cout << "  cameras.bin / cameras.txt" << std::endl;
-    std::cout << "  images.bin  / images.txt  (" << N << " images)" << std::endl;
-    std::cout << "  points3D.bin / points3D.txt (" << total_points << " points)" << std::endl;
 
     return 0;
 }
