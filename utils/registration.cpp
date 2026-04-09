@@ -528,14 +528,29 @@ int main(int argc, char** argv)
 
             if (u < margin_x || u >= max_proj_x || v < margin_y || v >= max_proj_y)
                 continue;
+            // Bilinear interpolation
+            int x0 = static_cast<int>(std::floor(u));
+            int y0 = static_cast<int>(std::floor(v));
+            int x1 = std::min(x0 + 1, cfg.img_w - 1);
+            int y1 = std::min(y0 + 1, cfg.img_h - 1);
+            x0 = std::max(x0, 0);
+            y0 = std::max(y0, 0);
 
-            int iu = std::clamp(static_cast<int>(std::round(u)), 0, cfg.img_w - 1);
-            int iv = std::clamp(static_cast<int>(std::round(v)), 0, cfg.img_h - 1);
+            float fx = static_cast<float>(u - std::floor(u));
+            float fy = static_cast<float>(v - std::floor(v));
+            float w00 = (1.0f - fx) * (1.0f - fy);
+            float w10 = fx           * (1.0f - fy);
+            float w01 = (1.0f - fx) * fy;
+            float w11 = fx           * fy;
 
-            const cv::Vec3b & pixel = img.at<cv::Vec3b>(iv, iu);
-            float r = pixel[0] / 255.0f;
-            float g = pixel[1] / 255.0f;
-            float b = pixel[2] / 255.0f;
+            const auto & p00 = img.at<cv::Vec3b>(y0, x0);
+            const auto & p10 = img.at<cv::Vec3b>(y0, x1);
+            const auto & p01 = img.at<cv::Vec3b>(y1, x0);
+            const auto & p11 = img.at<cv::Vec3b>(y1, x1);
+
+            float r = (w00 * p00[0] + w10 * p10[0] + w01 * p01[0] + w11 * p11[0]) / 255.0f;
+            float g = (w00 * p00[1] + w10 * p10[1] + w01 * p01[1] + w11 * p11[1]) / 255.0f;
+            float b = (w00 * p00[2] + w10 * p10[2] + w01 * p01[2] + w11 * p11[2]) / 255.0f;
 
             all_observations.push_back({orig_idx, r, g, b});
 
@@ -544,7 +559,7 @@ int main(int argc, char** argv)
                 point_colors(orig_idx, 0) = r;
                 point_colors(orig_idx, 1) = g;
                 point_colors(orig_idx, 2) = b;
-                diag_points.push_back({iu, iv, static_cast<float>(cz)});
+                diag_points.push_back({x0, y0, static_cast<float>(cz)});
             }
 
             found++;
