@@ -245,8 +245,17 @@ where `<data_folder>` is the `output_dir` you set in `launch_config.cfg`.
 
 Each utility reads its parameters from `<data_folder>/config.cfg`.
 
-> **Before running any Phase 2 utility**, copy the template config into your data folder and edit it to match your camera and scene.
-> At minimum, set the camera intrinsics (`focal_length`, `image_width`, `image_height`, `principal_x`, `principal_y`) and the camera-to-body transform (`trans_mat`). Without this file the utilities will fall back to built-in defaults, which will produce incorrect results.
+---
+> [!WARNING]
+> **`config.cfg` must be present in your data folder before running any Phase 2 utility.**
+>
+> Copy the template and edit it to match your camera and scene:
+> ```bash
+> cp path/to/liga_splat/config/config.cfg <data_folder>/config.cfg
+> ```
+> At minimum, set the camera intrinsics (`focal_length`, `image_width`, `image_height`, `principal_x`, `principal_y`) and the camera-to-body transform (`trans_mat`).
+> Without this file the utilities will fall back to built-in defaults and produce **incorrect results**.
+---
 
 ---
 
