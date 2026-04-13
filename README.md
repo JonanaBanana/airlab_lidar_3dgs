@@ -1,6 +1,14 @@
-# LiGa Splat
-
+# LiGa Splat - LiDAR-Guided 3D Gaussian Splatting Pipeline
 A ROS2 pipeline for capturing LiDAR + camera data and converting it into the COLMAP format required to train a [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) model.
+This pipeline has the advantage of not relying on visual features for pose extraction and sparse point cloud generation, and can thus work in environments not suitable for the regular COLMAP + 3DGS pipeline. Such environments could be sparse environments like wind turbine scans, or low texture homogenous environments like freighter hulls or tunnels.
+
+With accurate input poses, point clouds, and camera intrinsics, the reconstruction results are very good, both photometrically and geometrically.
+
+As an additional enhancement for sparse scenes with a lot of free space, it is possible to add a background sphere to initialize free space (floating) points on a background. This will further improve sparse environment reconstruction, by providing a clear separation between foreground and background.
+
+This work is a successor to [MESSER for 3DGS](https://github.com/JonanaBanana/MESSER_for_3DGS). It converts the code to C++ and improves upon the pipeline by adding more robust behavior and faster computation with multi-thread processing.
+
+This package has been tested with Ubuntu 22.04 and ROS2 Humble.
 
 ## Overview
 
