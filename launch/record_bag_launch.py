@@ -11,11 +11,10 @@ def generate_launch_description():
     with open(os.path.join(pkg_dir, 'config', 'launch_config.cfg'), 'r') as f:
         cfg = yaml.safe_load(f)
 
-    bag_name = 'isaacsim_bag_' + datetime.now().strftime('%Y%m%d_%H%M%S')
+    bag_name = 'liga_splat_bag_' + datetime.now().strftime('%Y%m%d_%H%M%S')
     output_dir = os.path.join(cfg['bag_output_dir'], bag_name)
 
     topics = [
-        '/isaacsim/camera_info',
         cfg['image_topic'],
         cfg['lidar_topic'],
         cfg['odom_topic'],
