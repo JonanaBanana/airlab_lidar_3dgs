@@ -438,9 +438,10 @@ ros2 run liga_splat depth_renderer $DATA --dense
 
 # 9. Train 3DGS (example — adjust paths as needed)
 python train.py \
-    -s $DATA/distorted \
-    -d $DATA/distorted/depth \
-    -r 1
+      -s /home/airlab/ros2_ws/src/liga_splat/example_dataset/distorted \
+      -d /home/airlab/ros2_ws/src/liga_splat/example_dataset/distorted/depth \
+      --depth_params /home/airlab/ros2_ws/src/liga_splat/example_dataset/distorted/sparse/0/depth_params.json \
+      --eval --densify_until_iter 10000 --opacity_reset_interval 11000 <other args>
 ```
 
 ---
