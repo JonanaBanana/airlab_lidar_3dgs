@@ -391,6 +391,16 @@ ros2 run liga_splat pcd_viewer <file.pcd> [rgb|z]
 # View odometry path + camera frustums overlaid on the point cloud
 ros2 run liga_splat pose_viewer <data_folder> [--no-pcd] [--frustum-scale <s>]
 ```
+<table align="center" width="100%">
+  <tr>
+    <td align="center" width="50%"><img src="image_samples/pcd_viewer.png"    width="100%"/></td>
+    <td align="center" width="50%"><img src="image_samples/pose_viewer.png" width="100%"/></td>
+  </tr>
+  <tr>
+    <td align="center"><em>PCD Viewer</em></td>
+    <td align="center"><em>Pose Viewer</em></td>
+  </tr>
+</table>
 
 ---
 
