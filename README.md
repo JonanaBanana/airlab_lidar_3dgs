@@ -1,13 +1,21 @@
-<p align="center">
-  <img src="image_samples/scene_rgb.png"    width="32%"/>
-  <img src="image_samples/registration.png" width="32%"/>
-  <img src="image_samples/depth_render.png" width="32%"/>
-</p>
-<p align="center">
-  <img src="image_samples/reconstruction.gif" width="100%"/>
-</p>
+<table align="center" width="100%">
+  <tr>
+    <td align="center" width="33%"><img src="image_samples/scene_rgb.png"    width="100%"/></td>
+    <td align="center" width="33%"><img src="image_samples/registration.png" width="100%"/></td>
+    <td align="center" width="33%"><img src="image_samples/depth_render.png" width="100%"/></td>
+  </tr>
+  <tr>
+    <td align="center"><em>RGB image</em></td>
+    <td align="center"><em>Colour registration</em></td>
+    <td align="center"><em>Depth render</em></td>
+  </tr>
+</table>
+<figure align="center">
+  <img src="image_samples/reconstruction.gif" width="66%"/>
+  <br/><em>3DGS reconstruction</em>
+</figure>
 
-# LiGa Splat - LiDAR-Guided 3D Gaussian Splatting Pipeline
+# LiGa Splat - LiDAR-Informed 3D Gaussian Splatting Pipeline
 A ROS2 pipeline for capturing LiDAR + Odometry + Camera data and converting it into the COLMAP format required to train a [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) model.
 This pipeline has the advantage of not relying on visual features for pose extraction and sparse point cloud generation, and can thus work in environments not suitable for the regular COLMAP + 3DGS pipeline. Such environments could be sparse environments like wind turbine scans, or low texture homogenous environments like freighter hulls or tunnels.
 
