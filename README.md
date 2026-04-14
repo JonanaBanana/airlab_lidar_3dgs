@@ -42,14 +42,12 @@ If you only need the utility code and dont want to install ROS2, you can skip in
 ---
 
 ## Build
-
+Again, skip this part if you do not want to use ROS2.
 ```bash
 cd ~/ros2_ws
 colcon build --packages-select liga_splat
 source install/setup.bash
 ```
-
-Again, skip this part if you do not want to use ROS2.
 ---
 
 ## Test (No ROS2)
