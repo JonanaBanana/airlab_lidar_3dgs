@@ -766,7 +766,6 @@ int main(int argc, char** argv)
               << "  python train.py \\\n"
               << "      -s " << data_folder << "distorted \\\n"
               << "      -d " << png_dir.string() << " \\\n"
-              << "      --depth_params " << params_path.string() << " \\\n"
               << "      --eval --densify_until_iter 10000 --opacity_reset_interval 11000 <other args>" << std::endl;
 
     return 0;

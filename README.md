@@ -440,7 +440,6 @@ ros2 run liga_splat depth_renderer $DATA --dense
 python train.py \
       -s /home/airlab/ros2_ws/src/liga_splat/example_dataset/distorted \
       -d /home/airlab/ros2_ws/src/liga_splat/example_dataset/distorted/depth \
-      --depth_params /home/airlab/ros2_ws/src/liga_splat/example_dataset/distorted/sparse/0/depth_params.json \
       --eval --densify_until_iter 10000 --opacity_reset_interval 11000 <other args>
 ```
 
